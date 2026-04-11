@@ -145,6 +145,12 @@ except Exception:
             VERSION = "1.0.0"
     else:
         VERSION = "1.0.0"
+    if VERSION == "1.0.0":
+        try:
+            import subprocess as _sp2
+            VERSION = _sp2.check_output(["dpkg-query", "-W", "-f=${Version}", "nox-cli"], stderr=_sp2.DEVNULL).decode().strip() or VERSION
+        except Exception:
+            pass
 BUILD_DATE = "2026-04-02"
 
 # ── Smart Path Layout ──────────────────────────────────────────────────
