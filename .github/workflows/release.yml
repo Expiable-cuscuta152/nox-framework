@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install pytest pytest-asyncio aiohttp pydantic colorama rich fpdf2 dnspython phonenumbers stem cloudscraper
+        run: pip install -r requirements.txt pytest pytest-asyncio
 
       - name: Run tests
         run: python -m pytest tests/ -v
