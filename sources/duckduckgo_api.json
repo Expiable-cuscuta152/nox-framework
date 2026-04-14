@@ -1,7 +1,7 @@
 {
     "name": "duckduckgo_api",
     "category": "search",
-    "endpoint": "https://searx.tiekoetter.com/search?q={target}&format=json&categories=general",
+    "endpoint": "https://search.sapti.me/search?q={target}&format=json&categories=general",
     "method": "GET",
     "requires_auth": false,
     "selectors": {
@@ -22,10 +22,16 @@
         "passive",
         "fast"
     ],
-    "health_check_url": "https://searx.tiekoetter.com",
+    "health_check_url": "https://search.sapti.me",
     "expected_status": 200,
     "reliability_score": 3,
     "is_volatile": true,
-    "backup_endpoints": [],
+    "backup_endpoints": [
+        "https://searx.tiekoetter.com/search?q={target}&format=json&categories=general",
+        "https://searx.perennialte.ch/search?q={target}&format=json&categories=general",
+        "https://search.mdosch.de/search?q={target}&format=json&categories=general",
+        "https://paulgo.io/search?q={target}&format=json&categories=general",
+        "https://priv.au/search?q={target}&format=json&categories=general"
+    ],
     "confidence": 0.7
 }

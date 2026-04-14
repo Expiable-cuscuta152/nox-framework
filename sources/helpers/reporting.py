@@ -48,11 +48,11 @@ def _raw(v: Any, maxlen: int = 200) -> str:
 
 
 def _pdf_safe(s: str, maxlen: int = 180) -> str:
-    # D4: sanitize for fpdf2 core fonts (latin-1 subset).
+    # Sanitise for fpdf2 core fonts (latin-1 subset).
     # NFKD normalization decomposes accented chars (é→e + combining accent)
     # so common accented Latin characters survive as their base letter.
-    # Truly non-latin-1 chars (Cyrillic, CJK, etc.) become '?' — intentional:
-    # fpdf2 core fonts cannot render them and would raise UnicodeEncodeError.
+    # Truly non-latin-1 chars (Cyrillic, CJK, etc.) become '?' — fpdf2 core
+    # fonts cannot render them and would raise UnicodeEncodeError.
     s = _raw(s, maxlen)
     try:
         import unicodedata
@@ -114,7 +114,7 @@ def render_pivot_chain(data: dict) -> List[str]:
     chain  = data.get("pivot_chain") or []
     target = _raw(data.get("target", "?"))
 
-    # D2: if pivot_log is available, build chain from it (accurate tree)
+    # Build chain from pivot_log when available — it carries the full tree with depth and provenance.
     pivot_log = data.get("pivot_log") or []
     if pivot_log:
         lines: List[str] = []
@@ -195,14 +195,12 @@ def to_json(data: dict, path: str) -> None:
     dork_results   = data.get("dork_results", []) or []
     scrape_results = data.get("scrape_results", {}) or {}
 
-    # D3: apply consistent cap (1000) — same as HTML
     _RECORD_CAP = 1000
 
     out_data = {
         "framework":       f"NOX v{_NOX_VERSION}",
         "generated":       datetime.now().isoformat(),
         "target":          data.get("target", ""),
-        # J3: self-describing metadata block
         "_meta": {
             "scan_id":        hashlib.sha256(
                 f"{data.get('target','')}{datetime.now().isoformat()}".encode()
@@ -387,7 +385,6 @@ def to_html(data: dict, path: str) -> None:
 # ── PDF report (fpdf2) ────────────────────────────────────────────────
 
 def to_pdf(data: dict, path: str, investigator_id: str = "NOX-AUTO") -> None:
-    # D1: raise a clear error with install hint if fpdf2 is absent — never silently return.
     try:
         from fpdf import FPDF  # type: ignore
     except ImportError:

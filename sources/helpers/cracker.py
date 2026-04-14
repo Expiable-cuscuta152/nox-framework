@@ -12,9 +12,9 @@ import logging
 import re
 from typing import List, Optional, Tuple
 
-# C2: MD5 and NTLM share the same 32-char hex pattern.
-# We list md5 first (most common in breach data) but also accept ntlm
-# so callers can query NTLM-specific APIs when needed.
+# MD5 and NTLM share the same 32-char hex pattern. MD5 is listed first as it
+# is the most common type in breach data. async_crack queries both md5 and
+# ntlm-specific APIs for any 32-char hash.
 _PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("bcrypt",  re.compile(r"^\$2[aby]?\$\d{2}\$.{53}$")),
     ("sha256",  re.compile(r"^[a-f0-9]{64}$", re.I)),
@@ -130,9 +130,23 @@ def _local_crack_sync_blocking(hash_value: str, hash_type: str) -> Optional[str]
     if not wordlist.exists():
         return None
     h = hash_value.strip().lower()
+    # usedforsecurity=False is required on FIPS-enabled systems (Python 3.9+).
+    # On Python 3.8 the kwarg does not exist, so we fall back gracefully.
+    def _md5(w):
+        try:
+            return _hl.md5(w, usedforsecurity=False).hexdigest()
+        except TypeError:
+            return _hl.md5(w).hexdigest()
+
+    def _sha1(w):
+        try:
+            return _hl.sha1(w, usedforsecurity=False).hexdigest()
+        except TypeError:
+            return _hl.sha1(w).hexdigest()
+
     _hashers = {
-        "md5":    lambda w: _hl.md5(w).hexdigest(),
-        "sha1":   lambda w: _hl.sha1(w).hexdigest(),
+        "md5":    _md5,
+        "sha1":   _sha1,
         "sha256": lambda w: _hl.sha256(w).hexdigest(),
     }
     hasher = _hashers.get(hash_type)

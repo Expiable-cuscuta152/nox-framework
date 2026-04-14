@@ -25,6 +25,7 @@
     "health_check_url": "https://api.twitter.com",
     "expected_status": 200,
     "reliability_score": 1,
+    "is_volatile": true,
     "backup_endpoints": [],
-    "confidence": 0.4
+    "confidence": 0.1
 }

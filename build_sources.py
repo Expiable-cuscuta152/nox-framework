@@ -69,8 +69,8 @@ class SourceConfig(BaseModel):
     bypass_required:   Optional[List[str]]     = None          # omitted when empty
     user_agent_type:   Optional[str]           = None          # omitted when absent
     backup_endpoints:  List[str]               = Field(default_factory=list)
-    # H2: optional confidence override — when set, takes precedence over formula
     confidence:        Optional[float]         = None
+    query_transform:   Optional[str]           = None          # e.g. "md5_lower"
     # Two-phase poll support (e.g. IntelX: POST → job_id → GET results)
     poll_endpoint:     Optional[str]           = None
     poll_id_field:     Optional[str]           = None
@@ -86,12 +86,10 @@ class SourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_source(self) -> "SourceConfig":
-        # H1: GET endpoints must contain {target} placeholder
         if self.method.upper() == "GET" and "{target}" not in self.endpoint:
             raise ValueError(
                 f"'{self.name}': GET endpoint must contain {{target}} placeholder: {self.endpoint!r}"
             )
-        # L3: volatile sources must have reliability_score ≤ 4 (was > 3, now > 4)
         if self.is_volatile and self.reliability_score > 4:
             raise ValueError(
                 f"'{self.name}': is_volatile sources must have reliability_score ≤ 4"
@@ -100,11 +98,10 @@ class SourceConfig(BaseModel):
 
     def to_json(self) -> str:
         data = self.model_dump(exclude_none=True)
-        # Drop is_volatile / bypass_required / user_agent_type when falsy
-        for key in ("is_volatile", "bypass_required", "user_agent_type"):
+        # Drop falsy optional fields
+        for key in ("is_volatile", "bypass_required", "user_agent_type", "query_transform"):
             if not data.get(key):
                 data.pop(key, None)
-        # H2: use explicit confidence if set, otherwise derive from reliability_score
         data["confidence"] = (
             round(self.confidence, 2)
             if self.confidence is not None
@@ -140,6 +137,8 @@ def _mk(
     poll_id_field: Optional[str] = None,
     poll_id_param: Optional[str] = None,
     poll_json_root: Optional[str] = None,
+    confidence: Optional[float] = None,
+    query_transform: Optional[str] = None,
 ) -> SourceConfig:
     return SourceConfig(
         name=name, category=category, endpoint=endpoint, method=method,
@@ -163,6 +162,8 @@ def _mk(
         poll_id_field=poll_id_field,
         poll_id_param=poll_id_param,
         poll_json_root=poll_json_root,
+        confidence=confidence,
+        query_transform=query_transform or None,
     )
 
 
@@ -261,15 +262,27 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           tags=["passive", "threat"],
           health_check_url="https://pulsedive.com", reliability_score=4),
 
+    _base("xposedornot", "breach_data",
+          "https://api.xposedornot.com/v1/breach-analytics?email={target}", "GET",
+          {"breaches": "$.ExposedBreaches.breaches_details"},
+          rate_limit=2.0,
+          headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"},
+          input_type="email", output_type=["email", "domain"],
+          normalization_map={"breach": "breach_name", "domain": "domain",
+                             "xposed_date": "breach_date", "xposed_data": "data_types",
+                             "password_risk": "password_risk"},
+          tags=["passive", "stealth"],
+          health_check_url="https://api.xposedornot.com", reliability_score=4, confidence=0.75),
+
     _base("hudsonrock_osint", "breach_data",
           "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-email?email={target}", "GET",
           {"stealers": "$.stealers"},
-          rate_limit=5.0,
+          rate_limit=30.0,
           headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"},
           input_type="email", output_type=["email", "domain", "username"],
           normalization_map={"stealers": "breach_record"},
           tags=["passive", "stealth"],
-          health_check_url="https://cavalier.hudsonrock.com", reliability_score=3),
+          health_check_url="https://cavalier.hudsonrock.com", reliability_score=3, is_volatile=True),
 
     _base("ipinfo_io", "geolocation",
           "https://ipinfo.io/{target}/json", "GET",
@@ -288,12 +301,13 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           tags=["passive", "fast"],
           health_check_url="https://ipapi.co", reliability_score=4),
 
-    _base("bgpview_ip", "network",
-          "https://api.bgpview.io/ip/{target}", "GET",
-          {"prefixes": "$.data.prefixes[*].prefix"},
+    _base("ripestat_ip", "network",
+          "https://stat.ripe.net/data/prefix-overview/data.json?resource={target}", "GET",
+          {"asns": "$.data.asns[*].asn", "holder": "$.data.asns[0].holder"},
           input_type="ip", output_type=["ip"],
+          normalization_map={"asn": "asn_number", "holder": "asn_org"},
           tags=["passive", "infrastructure"],
-          health_check_url="https://api.bgpview.io", reliability_score=2, is_volatile=True),
+          health_check_url="https://stat.ripe.net", reliability_score=5),
 
     _auth("emailrep_io", "email_rep",
           "https://emailrep.io/{target}", "GET",
@@ -327,6 +341,7 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           {"name": "$.entry[0].displayName"},
           rate_limit=2.0,
           input_type="email", output_type=["username"],
+          query_transform="md5_lower",
           tags=["passive"],
           health_check_url="https://www.gravatar.com", reliability_score=4),
 
@@ -445,12 +460,19 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           health_check_url="https://checkurl.phishtank.com", reliability_score=4),
 
     _base("duckduckgo_api", "search",
-          "https://searx.tiekoetter.com/search?q={target}&format=json&categories=general", "GET",
+          "https://search.sapti.me/search?q={target}&format=json&categories=general", "GET",
           {"results": "$.results"},
           input_type="any", output_type=["url"],
           normalization_map={"url": "url", "title": "title"},
           tags=["passive", "fast"],
-          health_check_url="https://searx.tiekoetter.com", reliability_score=3, is_volatile=True),
+          backup_endpoints=[
+              "https://searx.tiekoetter.com/search?q={target}&format=json&categories=general",
+              "https://searx.perennialte.ch/search?q={target}&format=json&categories=general",
+              "https://search.mdosch.de/search?q={target}&format=json&categories=general",
+              "https://paulgo.io/search?q={target}&format=json&categories=general",
+              "https://priv.au/search?q={target}&format=json&categories=general",
+          ],
+          health_check_url="https://search.sapti.me", reliability_score=3, is_volatile=True),
 
     _base("cve_search", "vulns",
           "https://cve.circl.lu/api/cve/{target}", "GET",
@@ -482,7 +504,6 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           tags=["passive", "stealth"],
           health_check_url="https://api.proxynova.com", reliability_score=3, is_volatile=True),
 
-    # ── New free sources (v1.0.1) ─────────────────────────────────────────────
 
     _base("shodan_internetdb", "scanners",
           "https://internetdb.shodan.io/{target}", "GET",
@@ -597,6 +618,7 @@ AUTHENTICATED_PREMIUM_SOURCES: List[SourceConfig] = [
           {"results": "$.results"},
           api_key_slots=["{FOFA_API_KEY}", "{FOFA_EMAIL}"],
           input_type="domain", output_type=["ip", "domain"],
+          query_transform="fofa_domain",
           tags=["passive", "infrastructure"],
           health_check_url="https://fofa.info", reliability_score=4),
 
@@ -732,11 +754,11 @@ AUTHENTICATED_PREMIUM_SOURCES: List[SourceConfig] = [
     _auth("threatconnect_search", "threat_intel",
           "https://api.threatconnect.com/v2/indicators/{target}", "GET",
           {"data": "$.data"},
-          headers={"Authorization": "TC {TC_API_KEY}:{TC_SIGNATURE}"},
+          headers={"Authorization": "TC {TC_API_KEY}"},
           api_key_slots=["{TC_API_KEY}"],
           input_type="any", output_type=["ip", "domain"],
           tags=["passive", "threat"],
-          health_check_url="https://api.threatconnect.com", reliability_score=4),
+          health_check_url="https://api.threatconnect.com", reliability_score=2, is_volatile=True),
 
     _auth("threatportal", "threat_intel",
           "https://threatportal.io/api/v1/search?q={target}", "GET",
@@ -797,11 +819,11 @@ AUTHENTICATED_PREMIUM_SOURCES: List[SourceConfig] = [
           "{MISP_URL}/attributes/restSearch", "POST",
           {"attributes": "$.Attribute[*].value"},
           headers={"Authorization": "{MISP_API_KEY}", "Content-Type": "application/json"},
-          api_key_slots=["{MISP_API_KEY}"],
+          api_key_slots=["{MISP_API_KEY}", "{MISP_URL}"],
           input_type="any", output_type=["ip", "domain", "hash"],
           payload_template={"returnFormat": "json", "value": "{target}"},
           tags=["passive", "threat"],
-          health_check_url="{MISP_URL}", reliability_score=4),
+          health_check_url="https://misp.local", reliability_score=4),
 ]
 
 AUTHENTICATED_PREMIUM_SOURCES += [
@@ -879,7 +901,7 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           health_check_url="https://leakcheck.io", reliability_score=4),
 
     _auth("spycloud_breach", "breaches",
-          "https://api.spycloud.io/enterprise-v2/breach/data/emails/{target}", "GET",
+          "https://api.spycloud.io/enterprise-v2/breach/catalog/emails/{target}", "GET",
           {"results": "$.results"},
           headers={"X-API-Key": "{SPYCLOUD_API_KEY}"},
           api_key_slots=["{SPYCLOUD_API_KEY}"],
@@ -990,7 +1012,8 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           api_key_slots=["{SPYONWEB_API_KEY}"],
           input_type="domain", output_type=["domain"],
           tags=["passive"],
-          health_check_url="https://api.spyonweb.com", reliability_score=3),
+          health_check_url="https://api.spyonweb.com", reliability_score=1,
+          is_volatile=True, confidence=0.1),
 
     # ── WHOIS ─────────────────────────────────────────────────────────────────
 
@@ -1077,7 +1100,8 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           api_key_slots=["{PIPL_API_KEY}"],
           input_type="email", output_type=["username", "domain", "phone"],
           tags=["passive"],
-          health_check_url="https://api.pipl.com", reliability_score=4),
+          health_check_url="https://api.pipl.com", reliability_score=2,
+          is_volatile=True, confidence=0.3),
 
     # ── Email Reputation ──────────────────────────────────────────────────────
 
@@ -1116,12 +1140,12 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           health_check_url="https://api.hunter.io", reliability_score=4),
 
     _auth("mailboxlayer", "email_rep",
-          "http://apilayer.net/api/check?access_key={MAILBOX_API_KEY}&email={target}", "GET",
+          "https://apilayer.net/api/check?access_key={MAILBOX_API_KEY}&email={target}", "GET",
           {"score": "$.score"},
           api_key_slots=["{MAILBOX_API_KEY}"],
           input_type="email", output_type=["email"],
           tags=["passive"],
-          health_check_url="http://apilayer.net", reliability_score=3),
+          health_check_url="https://apilayer.net", reliability_score=3),
 
     _auth("abstract_email", "email_rep",
           "https://emailvalidation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&email={target}", "GET",
@@ -1149,7 +1173,8 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           api_key_slots=["{TWITTER_BEARER_TOKEN}"],
           input_type="username", output_type=["username"],
           tags=["passive"],
-          health_check_url="https://api.twitter.com", reliability_score=1),
+          health_check_url="https://api.twitter.com", reliability_score=1,
+          is_volatile=True, confidence=0.1),
 
     _auth("github_code_search", "code",
           "https://api.github.com/search/code?q={target}", "GET",
@@ -1172,13 +1197,13 @@ AUTHENTICATED_PREMIUM_SOURCES += [
     # ── Geolocation ───────────────────────────────────────────────────────────
 
     _auth("ipstack", "geolocation",
-          "http://api.ipstack.com/{target}?access_key={IPSTACK_API_KEY}", "GET",
+          "https://api.ipstack.com/{target}?access_key={IPSTACK_API_KEY}", "GET",
           {"country": "$.country_name"},
           api_key_slots=["{IPSTACK_API_KEY}"],
           input_type="ip", output_type=["ip"],
           normalization_map={"country_name": "geo_country"},
           tags=["passive", "fast"],
-          health_check_url="http://api.ipstack.com", reliability_score=4),
+          health_check_url="https://api.ipstack.com", reliability_score=4),
 
     _auth("ipgeolocation_io", "geolocation",
           "https://api.ipgeolocation.io/ipgeo?apiKey={IPGEO_API_KEY}&ip={target}", "GET",
@@ -1207,27 +1232,24 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           health_check_url="https://extreme-ip-lookup.com", reliability_score=3),
 
     _auth("ipinfodb", "geolocation",
-          "http://api.ipinfodb.com/v3/ip-city/?key={IPINFODB_API_KEY}&ip={target}&format=json", "GET",
+          "https://api.ipinfodb.com/v3/ip-city/?key={IPINFODB_API_KEY}&ip={target}&format=json", "GET",
           {"city": "$.cityName"},
           api_key_slots=["{IPINFODB_API_KEY}"],
           input_type="ip", output_type=["ip"],
           normalization_map={"cityName": "geo_city"},
           tags=["passive"],
-          health_check_url="http://api.ipinfodb.com", reliability_score=3),
+          health_check_url="https://api.ipinfodb.com", reliability_score=3),
 
     # ── Phone ─────────────────────────────────────────────────────────────────
 
     _auth("numverify", "phone",
-          "http://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={target}", "GET",
+          "https://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={target}", "GET",
           {"valid": "$.valid", "carrier": "$.carrier"},
           api_key_slots=["{NUMVERIFY_API_KEY}"],
           input_type="phone", output_type=["phone"],
           normalization_map={"valid": "phone_valid", "carrier": "phone_carrier"},
           tags=["passive"],
-          health_check_url="http://apilayer.net", reliability_score=4),
-
-    # ── Hashes ────────────────────────────────────────────────────────────────
-    # hashes_org removed — service unavailable
+          health_check_url="https://apilayer.net", reliability_score=4),
 
     # ── Search ────────────────────────────────────────────────────────────────
 
@@ -1248,7 +1270,6 @@ AUTHENTICATED_PREMIUM_SOURCES += [
           tags=["passive"],
           health_check_url="https://api.bing.microsoft.com", reliability_score=5),
 
-    # ── New authenticated sources (v1.0.1) ───────────────────────────────────
 
     _auth("threatfox", "threat_intel",
           "https://threatfox-api.abuse.ch/api/v1/", "POST",
@@ -1315,9 +1336,9 @@ AUTHENTICATED_PREMIUM_SOURCES += [
 # ---------------------------------------------------------------------------
 
 def build_nox_sources(output_dir: str = None) -> None:
-    # H3: resolve output_dir relative to this script's location, not CWD.
-    # This ensures `python /opt/nox-cli/build_sources.py` from any directory
-    # always writes to /opt/nox-cli/sources/ instead of ./sources/.
+    # Resolve output_dir relative to this script's location so the command
+    # `python /opt/nox-cli/build_sources.py` always writes to the correct
+    # package sources/ directory regardless of the working directory.
     if output_dir is None:
         output_dir = str(Path(__file__).resolve().parent / "sources")
     os.makedirs(output_dir, exist_ok=True)

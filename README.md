@@ -11,13 +11,13 @@
 
 **Cyber Threat Intelligence Framework**
 
-[![Status](https://img.shields.io/badge/Status-v1.0.1-success)](https://github.com/nox-project/nox-framework/releases/tag/v1.0.1)
+[![Status](https://img.shields.io/badge/Status-v1.0.2-success)](https://github.com/nox-project/nox-framework/releases/tag/v1.0.2)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE.txt)
 [![Kali Linux](https://img.shields.io/badge/Kali%20Linux-Ready-557C94?logo=kalilinux&logoColor=white)](https://www.kali.org/)
 [![BlackArch](https://img.shields.io/badge/BlackArch-Available-1E1E2E?logo=archlinux&logoColor=white)](https://blackarch.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/nox-project/nox-framework)
-[![Sources](https://img.shields.io/badge/Sources-123-red)](https://github.com/nox-project/nox-framework)
+[![Sources](https://img.shields.io/badge/Sources-124-red)](https://github.com/nox-project/nox-framework)
 
 *OSINT framework for red teaming, digital forensics, and corporate exposure analysis.*
 
@@ -31,7 +31,7 @@ NOX is a purpose-built cyber threat intelligence engine designed for operators w
 
 | Capability | Detail |
 |-|-|
-| ⚡ **Async Execution Engine** | Massively parallel scanning across 123 intelligence feeds with no sequential bottlenecks and no blocking I/O. |
+| ⚡ **Async Execution Engine** | Massively parallel scanning across 124 intelligence feeds with no sequential bottlenecks and no blocking I/O. |
 | 🛡️ **Guardian Engine** | Integrated OPSEC layer with automatic proxy rotation and SOCKS5 support. Fail-safe kill-switch halts all traffic if the transport circuit is unavailable. |
 | 🧠 **Risk Scoring** | Dynamic 0–100 scoring with time-decay, source confidence weighting, password complexity analysis, persistence multipliers, and HVT detection. |
 | 🔗 **Recursive Avalanche Engine** | Every discovered asset — username, email, cracked password, phone — is automatically re-injected as a new scan seed. Per-asset pipeline runs sequentially (breach → crack → dork → scrape); child assets run concurrently. Identifiers from all four phases feed the pivot queue. Global deduplication and configurable depth cap prevent runaway recursion. |
@@ -43,7 +43,7 @@ NOX is a purpose-built cyber threat intelligence engine designed for operators w
 
 | Feature | Description |
 |-|-|
-| **123 JSON Plugin Sources** | Every intelligence source is a JSON plugin. The execution engine contains zero hardcoded source logic. |
+| **124 JSON Plugin Sources** | Every intelligence source is a JSON plugin. The execution engine contains zero hardcoded source logic. |
 | **Async Core** | Full `asyncio` event loop with JA3 fingerprinting, SSL session management, per-request jitter, and configurable concurrency. |
 | **Autoscan Pipeline** | `--autoscan` triggers: breach scan → recursive pivot → Google/Bing/SearXNG dorking → paste/Telegram scraping — all in one command. |
 | **Recursive Avalanche Engine** | Every identifier discovered — from breach records, dork hits, or scraped paste/Telegram content — is re-injected as a new seed. Per-asset pipeline is sequential (breach → crack → dork → scrape); child assets run concurrently via `asyncio.gather`. A global `seen_assets` set prevents infinite loops. Concurrency and depth are fully configurable at runtime via `--threads` and `--depth`. |
@@ -108,7 +108,7 @@ Supported fields: `name`, `endpoint`, `method`, `headers`, `regex_pattern` (or `
 ```
 For each asset (seed + every discovered identifier):
   ├─ Phase 1 — Breach Scan
-  │     123 sources queried in parallel (async)
+  │     124 sources queried in parallel (async)
   │
   ├─ Phase 2 — Hash Crack (non-blocking, concurrent)
   │     Hashes found in breach data → rainbow-table APIs → cracked plaintext
@@ -258,7 +258,7 @@ nox-cli --help
 The post-install script automatically:
 1. Creates an isolated virtual environment at `/opt/nox-cli/.venv`
 2. Installs all Python dependencies inside the venv (PEP 668 compliant — zero system pollution)
-3. Builds the 123 source plugins
+3. Builds the 124 source plugins
 4. Links `/usr/bin/nox-cli` → `/opt/nox-cli/nox-wrapper.sh`
 
 ### Option 2: From Source

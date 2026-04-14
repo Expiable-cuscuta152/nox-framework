@@ -1,7 +1,7 @@
 {
     "name": "ipstack",
     "category": "geolocation",
-    "endpoint": "http://api.ipstack.com/{target}?access_key={IPSTACK_API_KEY}",
+    "endpoint": "https://api.ipstack.com/{target}?access_key={IPSTACK_API_KEY}",
     "method": "GET",
     "requires_auth": true,
     "selectors": {
@@ -23,7 +23,7 @@
         "passive",
         "fast"
     ],
-    "health_check_url": "http://api.ipstack.com",
+    "health_check_url": "https://api.ipstack.com",
     "expected_status": 200,
     "reliability_score": 4,
     "backup_endpoints": [],

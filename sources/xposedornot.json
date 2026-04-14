@@ -1,13 +1,13 @@
 {
-    "name": "hudsonrock_osint",
+    "name": "xposedornot",
     "category": "breach_data",
-    "endpoint": "https://cavalier.hudsonrock.com/api/json/v2/osint-tools/search-by-email?email={target}",
+    "endpoint": "https://api.xposedornot.com/v1/breach-analytics?email={target}",
     "method": "GET",
     "requires_auth": false,
     "selectors": {
-        "stealers": "$.stealers"
+        "breaches": "$.ExposedBreaches.breaches_details"
     },
-    "rate_limit": 30.0,
+    "rate_limit": 2.0,
     "headers": {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
     },
@@ -15,20 +15,22 @@
     "input_type": "email",
     "output_type": [
         "email",
-        "domain",
-        "username"
+        "domain"
     ],
     "normalization_map": {
-        "stealers": "breach_record"
+        "breach": "breach_name",
+        "domain": "domain",
+        "xposed_date": "breach_date",
+        "xposed_data": "data_types",
+        "password_risk": "password_risk"
     },
     "tags": [
         "passive",
         "stealth"
     ],
-    "health_check_url": "https://cavalier.hudsonrock.com",
+    "health_check_url": "https://api.xposedornot.com",
     "expected_status": 200,
-    "reliability_score": 3,
-    "is_volatile": true,
+    "reliability_score": 4,
     "backup_endpoints": [],
-    "confidence": 0.7
+    "confidence": 0.75
 }

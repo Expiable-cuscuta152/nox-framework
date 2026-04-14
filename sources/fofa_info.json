@@ -27,5 +27,6 @@
     "expected_status": 200,
     "reliability_score": 4,
     "backup_endpoints": [],
+    "query_transform": "fofa_domain",
     "confidence": 0.85
 }

@@ -31,7 +31,6 @@ _PIVOT_TYPES = {"email", "username", "phone", "name", "ip", "domain"}
 
 
 def _cfg_depth(orc=None) -> int:
-    # A7/A10: read from orchestrator config if available
     if orc is not None:
         cfg = getattr(orc, "config", None)
         if cfg is not None:
@@ -46,7 +45,6 @@ def _cfg_depth(orc=None) -> int:
 
 
 def _cfg_concurrency(orc=None) -> int:
-    # A7: read from orchestrator config if available
     if orc is not None:
         cfg = getattr(orc, "config", None)
         if cfg is not None:
@@ -137,29 +135,24 @@ class AvalancheScanner:
     def __init__(self, orchestrator: "Orchestrator") -> None:
         self._orc             = orchestrator
         self.seen_assets: Set[str]  = set()
-        # A2: single semaphore for the entire run, created lazily inside the event loop
         self._sem: Optional[asyncio.Semaphore] = None
         self._all_records: List     = []
         self._dork_hits:   List[dict] = []
         self._seen_dork_urls: Set[str] = set()
-        # A6: scrape_hits merged atomically per _do_process call
         self._scrape_hits: Dict     = {"pastes": [], "credentials": [], "hashes": [],
                                        "telegram": [], "dork_misconfigs": []}
         self._max_depth: int        = 0
         self._in_flight: Dict[str, asyncio.Future] = {}
         self.pivot_log: List[dict]  = []
-        # A8: global set to prevent duplicate entries in discovered_assets
         self._seen_discovered: Set[str] = set()
         self.discovered_assets: List[dict] = []
 
     def _get_sem(self) -> asyncio.Semaphore:
-        # A2: semaphore created once per run, shared across all coroutines
         if self._sem is None:
             self._sem = asyncio.Semaphore(_cfg_concurrency(self._orc))
         return self._sem
 
     async def run(self, target: str) -> tuple:
-        # A9: respect no_pivot flag from config
         cfg = getattr(self._orc, "config", None)
         no_pivot = getattr(cfg, "no_pivot", False) if cfg else False
         if no_pivot:
@@ -196,7 +189,6 @@ class AvalancheScanner:
     async def _process(self, asset: str, depth: int,
                        parent: Optional[str], found_in: str) -> None:
         """Dedup gate: ensures each asset is processed exactly once."""
-        # A10: use per-run depth from orchestrator config
         if depth > _cfg_depth(self._orc):
             _syslog.debug("avalanche depth cap reached for %s", asset)
             return
@@ -205,7 +197,7 @@ class AvalancheScanner:
         if not key:
             return
 
-        # A1: add to seen_assets FIRST (atomic gate) before any other check.
+        # Add to seen_assets before any await to prevent concurrent duplicates.
         # If already present, wait on the in-flight future if one exists, then return.
         if key in self.seen_assets:
             if key in self._in_flight:
@@ -326,7 +318,8 @@ class AvalancheScanner:
             _syslog.warning("SCRAPE_FAIL asset=%s err=%s", asset, exc)
             scrape_res = {}
 
-        # A6: collect scrape results locally, then merge atomically
+        # Collect scrape results locally then merge into the shared dict.
+        # The event loop is single-threaded so the merge is safe without a lock.
         scrape_count = 0
         local_scrape: Dict = {k: [] for k in self._scrape_hits}
         for k in self._scrape_hits:
@@ -336,7 +329,7 @@ class AvalancheScanner:
                     item["pivot_depth"] = depth
                 local_scrape[k].append(item)
                 scrape_count += 1
-        # Atomic merge into shared dict (single-threaded event loop — safe)
+        # Merge into shared dict — safe within the single-threaded event loop.
         for k, items in local_scrape.items():
             self._scrape_hits[k].extend(items)
         _out("ok" if scrape_count else "dim",
@@ -393,7 +386,6 @@ class AvalancheScanner:
             queued.add(child_key)
             child_entry = {"asset": val, "qtype": vqtype, "found_in": phase, "ref": ref}
             children.append(child_entry)
-            # A8: prevent duplicate entries in discovered_assets across parallel parents
             if child_key not in self._seen_discovered:
                 self._seen_discovered.add(child_key)
                 self.discovered_assets.append({
@@ -412,12 +404,12 @@ class AvalancheScanner:
                 self._process(val, depth + 1, parent=asset, found_in=phase)
             )
 
-        # A5: run child tasks FIRST, then append pivot_log so the log reflects actual outcomes
+        # Run child tasks before appending to pivot_log so the log reflects actual outcomes.
         if child_tasks:
             _out("info", f"{indent}  → reinjecting {len(child_tasks)} new asset(s)…")
             await asyncio.gather(*child_tasks, return_exceptions=True)
 
-        # ── Log this node (after children complete — A5) ──────────────
+        # ── Log this node ─────────────────────────────────────────────
         self.pivot_log.append({
             "asset":    asset,
             "qtype":    qtype,
@@ -461,8 +453,8 @@ class AvalancheScanner:
     # ── Scrape dispatcher ─────────────────────────────────────────────
 
     async def _async_scrape(self, asset: str) -> dict:
-        # A3: instantiate a fresh Session + ScrapeEngine per call to avoid sharing
-        # a non-thread-safe requests.Session / cloudscraper across concurrent coroutines.
+        # Instantiate a fresh Session and ScrapeEngine per call — requests.Session
+        # and cloudscraper are not safe to share across concurrent coroutines.
         _empty: dict = {"pastes": [], "credentials": [], "hashes": [],
                         "telegram": [], "dork_misconfigs": []}
         try:
@@ -517,8 +509,7 @@ async def _crack_and_inject(session, hash_value: str, record_ref,
     _out("ok", f"  [crack] {hash_value[:16]}… → {plaintext}  (from {parent_asset})")
     cracked_out.append(plaintext)
 
-    # A4: inject cracked plaintext as qtype="password" — NOT as username.
-    # Only pivot on it if sources support password-recycling queries.
+    # Inject the cracked plaintext as a password-recycling pivot seed.
     key = plaintext.lower()
     if key not in seen_assets and depth + 1 <= _cfg_depth(scanner._orc):
         await scanner._process(plaintext, depth + 1,

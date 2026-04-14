@@ -1,7 +1,7 @@
 {
     "name": "numverify",
     "category": "phone",
-    "endpoint": "http://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={target}",
+    "endpoint": "https://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={target}",
     "method": "GET",
     "requires_auth": true,
     "selectors": {
@@ -24,7 +24,7 @@
     "tags": [
         "passive"
     ],
-    "health_check_url": "http://apilayer.net",
+    "health_check_url": "https://apilayer.net",
     "expected_status": 200,
     "reliability_score": 4,
     "backup_endpoints": [],

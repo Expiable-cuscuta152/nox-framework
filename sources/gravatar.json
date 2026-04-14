@@ -22,5 +22,6 @@
     "expected_status": 200,
     "reliability_score": 4,
     "backup_endpoints": [],
+    "query_transform": "md5_lower",
     "confidence": 0.85
 }

@@ -1,0 +1,31 @@
+{
+    "name": "ripestat_ip",
+    "category": "network",
+    "endpoint": "https://stat.ripe.net/data/prefix-overview/data.json?resource={target}",
+    "method": "GET",
+    "requires_auth": false,
+    "selectors": {
+        "asns": "$.data.asns[*].asn",
+        "holder": "$.data.asns[0].holder"
+    },
+    "rate_limit": 1.0,
+    "headers": {},
+    "api_key_slots": [],
+    "input_type": "ip",
+    "output_type": [
+        "ip"
+    ],
+    "normalization_map": {
+        "asn": "asn_number",
+        "holder": "asn_org"
+    },
+    "tags": [
+        "passive",
+        "infrastructure"
+    ],
+    "health_check_url": "https://stat.ripe.net",
+    "expected_status": 200,
+    "reliability_score": 5,
+    "backup_endpoints": [],
+    "confidence": 1.0
+}

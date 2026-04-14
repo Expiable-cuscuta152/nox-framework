@@ -17,7 +17,8 @@
         "value": "{target}"
     },
     "api_key_slots": [
-        "{MISP_API_KEY}"
+        "{MISP_API_KEY}",
+        "{MISP_URL}"
     ],
     "input_type": "any",
     "output_type": [
@@ -30,7 +31,7 @@
         "passive",
         "threat"
     ],
-    "health_check_url": "{MISP_URL}",
+    "health_check_url": "https://misp.local",
     "expected_status": 200,
     "reliability_score": 4,
     "backup_endpoints": [],

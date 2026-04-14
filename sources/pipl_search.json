@@ -24,7 +24,8 @@
     ],
     "health_check_url": "https://api.pipl.com",
     "expected_status": 200,
-    "reliability_score": 4,
+    "reliability_score": 2,
+    "is_volatile": true,
     "backup_endpoints": [],
-    "confidence": 0.85
+    "confidence": 0.3
 }

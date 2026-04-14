@@ -65,7 +65,6 @@ import re
 import sys
 import time
 import threading
-# Module-level lock for thread-safe proxy env var assignment (Bug 9 fix)
 _PROXY_ENV_LOCK = threading.Lock()
 import argparse
 import csv
@@ -151,7 +150,7 @@ except Exception:
             VERSION = _sp2.check_output(["dpkg-query", "-W", "-f=${Version}", "nox-cli"], stderr=_sp2.DEVNULL).decode().strip() or VERSION
         except Exception:
             pass
-BUILD_DATE = "2026-04-02"
+BUILD_DATE = "2026-04-14"
 
 # ── Smart Path Layout ──────────────────────────────────────────────────
 HOME_NOX    = Path.home() / ".nox"
@@ -205,8 +204,8 @@ def initialize_environment() -> None:
             cfg.write(fh)
 
     # Smart source discovery: seed ~/.nox/sources/ from package sources/
-    # B6: only copy if destination is absent — never silently overwrite
-    # user-customised sources. Use --reset-sources to force a full resync.
+    # Only copies files that are absent — never overwrites user-customised sources.
+    # Use --reset-sources to force a full resync.
     candidate = _PKG_ROOT / "sources"
     if not candidate.is_dir():
         candidate = Path("/usr/share/nox-cli/sources")
@@ -279,7 +278,6 @@ class NoxConfig:
         self.allow_leak   = False
         self.no_online_crack = False
         self.max_threads  = Cfg.CONCURRENCY
-        # A9/I3: pivot control — readable by AvalancheScanner
         self.no_pivot     = False
         self.pivot_depth  = Cfg.PIVOT_DEPTH
 
@@ -626,7 +624,7 @@ class Record:
         return hashlib.sha256(f"{em}:{pw}".encode()).hexdigest()
 
     def get_fingerprint(self) -> str:
-        """Genera un hash univoco per evitare duplicati nel database."""
+        """Return a SHA-256 fingerprint for cross-source deduplication."""
         data_str = f"{self.source}|{self.email}|{self.password}|{self.phone}|{self.address}"
         return hashlib.sha256(data_str.encode()).hexdigest()
 
@@ -663,8 +661,8 @@ class RiskEngine:
         pts = 0.0
         if record.password:
             pts += 60
-            # I5: adjust base points by password complexity
-            # Weak passwords (trivially guessable) score lower; strong ones score higher.
+            # Adjust base points by password complexity.
+            # Weak passwords score lower; strong ones score higher.
             try:
                 _pa_score = PassAnalyzer().analyze(record.password).get("score", 50)
                 if _pa_score < 30:
@@ -1069,7 +1067,6 @@ class DatabaseManager:
                     iid = row["id"]
                     for pivot_val, count in profile.pivot_count.items():
                         if count > 1:
-                            # I6: use Detect.qtype instead of length heuristic
                             _ptype = Detect.qtype(pivot_val)
                             if _ptype not in ("email", "username", "phone", "domain", "ip"):
                                 _ptype = "username"
@@ -1190,7 +1187,6 @@ class DatabaseManager:
                 iid = row["id"]
                 for pivot_val, count in profile.pivot_count.items():
                     if count > 1:
-                        # I6: use Detect.qtype instead of length heuristic
                         _ptype = Detect.qtype(pivot_val)
                         if _ptype not in ("email", "username", "phone", "domain", "ip"):
                             _ptype = "username"
@@ -1514,10 +1510,14 @@ class DB:
 
     def close(self) -> None:
         """Stop the background event loop thread and release resources."""
-        if self._use_async and hasattr(self, "_loop") and self._loop.is_running():
+        if not (self._use_async and hasattr(self, "_loop")):
+            return
+        if self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
             if hasattr(self, "_loop_thread"):
                 self._loop_thread.join(timeout=5)
+        if not self._loop.is_closed():
+            self._loop.close()
 
     def __del__(self) -> None:
         try:
@@ -1607,19 +1607,21 @@ def _random_headers(extra: Optional[Dict] = None) -> Dict[str, str]:
         "Sec-Fetch-Site":            random.choice(_SEC_FETCH_SITE_POOL),
         "Cache-Control":             "max-age=0",
     }
-    # Add Sec-CH-UA Client Hints for Chromium-based UAs (Firefox omits these)
-    if "Firefox" not in ua:
-        ch_ua = next((v for k, v in _CH_UA_MAP if k in ua), None)
+    if extra:
+        h.update(extra)
+    # Derive the final UA after applying overrides so that a Firefox UA passed
+    # via `extra` correctly suppresses Chromium-only Sec-CH-UA headers.
+    final_ua = h["User-Agent"]
+    if "Firefox" not in final_ua:
+        ch_ua = next((v for k, v in _CH_UA_MAP if k in final_ua), None)
         if ch_ua:
             h["Sec-CH-UA"]          = ch_ua
             h["Sec-CH-UA-Mobile"]   = "?0"
             h["Sec-CH-UA-Platform"] = (
-                '"Windows"' if "Windows" in ua else
-                '"macOS"'   if "Mac"     in ua else
+                '"Windows"' if "Windows" in final_ua else
+                '"macOS"'   if "Mac"     in final_ua else
                 '"Linux"'
             )
-    if extra:
-        h.update(extra)
     return h
 
 
@@ -1628,6 +1630,20 @@ async def _jitter(cfg: "NoxConfig") -> None:
     if cfg.stealth:
         lo, hi = cfg.rate_limit
         await asyncio.sleep(random.uniform(lo, hi))
+
+
+def _parse_retry_after(value: str, default: float) -> float:
+    """Parse a Retry-After header value — handles both integer seconds and HTTP-date strings."""
+    try:
+        return float(int(value))
+    except (ValueError, TypeError):
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        delta = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+    except Exception:
+        return default
 
 
 # ── Async Source Base ──────────────────────────────────────────────────
@@ -1701,7 +1717,7 @@ class AsyncSource(ABC):
                 async with self._sem:
                     async with session.get(url, headers=hdrs, timeout=to, ssl=_SSL_CTX) as resp:
                         if resp.status == 429:
-                            retry_after = int(resp.headers.get("Retry-After", Cfg.RETRY_DELAY * (attempt + 2)))
+                            retry_after = _parse_retry_after(resp.headers.get("Retry-After", ""), Cfg.RETRY_DELAY * (attempt + 2))
                             _syslog.info("RATE_LIMIT source=%s url=%s retry_after=%ds", self.name, url[:80], retry_after)
                             await asyncio.sleep(min(retry_after, 30))
                             continue
@@ -1728,7 +1744,7 @@ class AsyncSource(ABC):
                         hdrs["Content-Type"] = "application/json"
                         async with session.post(url, json=json_data, headers=hdrs, timeout=to, ssl=_SSL_CTX) as resp:
                             if resp.status == 429:
-                                retry_after = int(resp.headers.get("Retry-After", Cfg.RETRY_DELAY * (attempt + 2)))
+                                retry_after = _parse_retry_after(resp.headers.get("Retry-After", ""), Cfg.RETRY_DELAY * (attempt + 2))
                                 _syslog.info("RATE_LIMIT source=%s url=%s retry_after=%ds", self.name, url[:80], retry_after)
                                 await asyncio.sleep(min(retry_after, 30))
                                 continue
@@ -1739,7 +1755,7 @@ class AsyncSource(ABC):
                     else:
                         async with session.post(url, data=data or {}, headers=hdrs, timeout=to, ssl=_SSL_CTX) as resp:
                             if resp.status == 429:
-                                retry_after = int(resp.headers.get("Retry-After", Cfg.RETRY_DELAY * (attempt + 2)))
+                                retry_after = _parse_retry_after(resp.headers.get("Retry-After", ""), Cfg.RETRY_DELAY * (attempt + 2))
                                 _syslog.info("RATE_LIMIT source=%s url=%s retry_after=%ds", self.name, url[:80], retry_after)
                                 await asyncio.sleep(min(retry_after, 30))
                                 continue
@@ -1917,7 +1933,7 @@ class Session:
                         data = gzip.decompress(data)
                     return self._make_response(raw.status, data, dict(raw.headers), raw.url)
                 if getattr(r, "status_code", 0) == 429:
-                    retry_after = int(r.headers.get("Retry-After", Cfg.RETRY_DELAY * (attempt + 2)))
+                    retry_after = _parse_retry_after(r.headers.get("Retry-After", ""), Cfg.RETRY_DELAY * (attempt + 2))
                     time.sleep(min(retry_after, 30))
                     continue
                 return r
@@ -1941,7 +1957,7 @@ class Session:
                     else:
                         r = self._s.post(url, data=data, headers=hdrs, timeout=to)
                     if getattr(r, "status_code", 0) == 429:
-                        retry_after = int(r.headers.get("Retry-After", Cfg.RETRY_DELAY * (attempt + 2)))
+                        retry_after = _parse_retry_after(r.headers.get("Retry-After", ""), Cfg.RETRY_DELAY * (attempt + 2))
                         time.sleep(min(retry_after, 30))
                         continue
                     return r
@@ -2140,9 +2156,9 @@ class ProxyManager:
         """
         Test a proxy by requesting https://api.ipify.org.
         Returns the observed exit IP on success, None on failure.
-        F1: SOCKS5 proxies are validated via requests+PySocks, not urllib.
+        SOCKS5 proxies are validated via requests+PySocks, not urllib.
         """
-        # F1: urllib.ProxyHandler does not support SOCKS5 — use requests if available
+        # urllib.ProxyHandler does not support SOCKS5 — use requests if available
         if proxy.startswith("socks5") or proxy.startswith("socks4"):
             try:
                 import requests as _req  # type: ignore
@@ -2420,23 +2436,19 @@ class DorkEngine:
 
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 
-        def _run_one(dork: str, eng: str) -> List[dict]:
+        def _run_one(dork: str) -> List[dict]:
             query = dork.replace("{q}", q)
-            # Per-engine jitter — applied once per (dork, engine) pair, not per dork
             time.sleep(random.uniform(*Cfg.DORK_DELAY))
-            hits = self._search(query, eng)
+            hits = self._search(query, "SearXNG")
             for h in hits:
                 h["dork"]   = query
-                h["engine"] = eng
+                h["engine"] = "SearXNG"
             return hits
 
         results = []
-        pairs = [(dork, eng) for dork in dorks for eng in engines]
-        if not pairs:
-            return []
-        max_workers = min(len(pairs), 12)  # cap threads to avoid hammering search engines
+        max_workers = min(len(dorks), 12)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_run_one, d, e): (d, e) for d, e in pairs}
+            futures = {pool.submit(_run_one, d): d for d in dorks}
             for fut in _as_completed(futures):
                 try:
                     results.extend(fut.result())
@@ -2842,8 +2854,6 @@ class HashEngine:
         return list(set(mutations))
 
     def _online(self, h: str) -> Optional[str]:
-        # cmd5.org removed — paywalled, returns error for all hashes
-        # hashes.com requires a paid API key (HASHES_COM_API_KEY)
         try:
             from sources.helpers.config_handler import ConfigManager  # type: ignore
             key = ConfigManager.get_key("HASHES_COM_API_KEY")
@@ -2866,11 +2876,12 @@ class HashEngine:
     def _hashmob(self, h: str) -> Optional[str]:
         try:
             if not self._session: return None
-            resp = self._session.post("https://hashmob.net/api/v2/search", json_data={"hash":h}, timeout=10)
+            resp = self._session.post("https://hashmob.net/api/v2/search", json_data={"hashes": [h]}, timeout=10)
             if resp.ok:
                 data = resp.json()
-                if data.get("found") and data.get("result"):
-                    return data["result"]
+                results = data.get("data") or []
+                if isinstance(results, list) and results:
+                    return results[0].get("plaintext") or results[0].get("result") or None
         except Exception: pass
         return None
 
@@ -3133,9 +3144,8 @@ class Orchestrator:
         # ── Fail-Safe Proxy check (transport-level, before any connection) ──
         ProxyManager.fail_safe_check(self.config, allow_leak=self.config.allow_leak)
 
-        # B1: recreate SourceOrchestrator on every call so the new semaphore is
-        # propagated to all source instances. Plugin JSON files are cached by
-        # SourceOrchestrator._load_nox_sources via the module-level mtime guard (L2).
+        # SourceOrchestrator is created once and reused across calls. The semaphore
+        # is rebound on each invocation so concurrency limits are always respected.
         if self._source_orchestrator is None:
             self._source_orchestrator = SourceOrchestrator(
                 self._get_semaphore(), self.db, self.config
@@ -3173,7 +3183,7 @@ class Orchestrator:
             return records
 
         connector = aiohttp_mod.TCPConnector(ssl=_SSL_CTX, limit=self.config.concurrency, family=0)  # family=0 → AF_UNSPEC (IPv4+IPv6)
-        # B5: SOCKS5 proxies are not supported via trust_env — use ProxyConnector directly.
+        # SOCKS5 proxies require ProxyConnector — aiohttp trust_env does not support SOCKS5.
         _socks5_connector = False
         if self.config.proxy and self.config.proxy.startswith("socks5"):
             try:
@@ -3182,8 +3192,8 @@ class Orchestrator:
                 _socks5_connector = True
             except ImportError:
                 logger.warning("aiohttp_socks not installed — SOCKS5 proxy bypassed. Install: pip install aiohttp-socks")
-        # B2: set _proxy_env_set flag immediately after os.environ assignment
-        # Use a module-level lock to prevent concurrent scans from racing on env vars.
+        # Set proxy environment variables for HTTP/S proxies so aiohttp trust_env picks them up.
+        # A module-level lock prevents concurrent scans from racing on the shared env vars.
         _proxy_env_set = False
         if self.config.proxy and not _socks5_connector and not os.environ.get("HTTPS_PROXY"):
             with _PROXY_ENV_LOCK:
@@ -3951,7 +3961,6 @@ class AdvancedReporter:
             lines += ["","---",f"## Pivot Tree ({len(pivot_log)} nodes)","",
                       "| Depth | Asset | Type | Found In | Parent | Breach | Dorks | Scrape | Children | Cracked |",
                       "|-------|-------|------|----------|--------|--------|-------|--------|----------|---------|"]
-            # J4: sort by (depth, parent, asset) for readable depth-first narrative
             for e in sorted(pivot_log, key=lambda x: (x.get("depth", 0), x.get("parent") or "", x.get("asset", ""))):
                 cracked_str  = _r(", ".join(e.get("cracked", [])[:3]))
                 children     = e.get("children", [])
@@ -4055,7 +4064,6 @@ class Reporter:
     def to_pdf(data: dict, path: str, investigator_id: str = "NOX-AUTO") -> None:
         path = Reporter._resolve_path(path, "pdf")
         if _HAS_REPORTING:
-            # D1: _rep_pdf raises RuntimeError if fpdf2 is missing — let it propagate
             try:
                 _rep_pdf(data, path, investigator_id=investigator_id)
             except RuntimeError as e:
@@ -4070,7 +4078,6 @@ class Reporter:
             pass
         # Fallback: weasyprint HTML→PDF
         if not weasyprint:
-            # D1: explicit error — no silent return with no output file
             out("err", "No PDF library found. Install fpdf2: pip install fpdf2")
             return
         tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False)
@@ -4180,7 +4187,6 @@ class REPL:
     def _dispatch(self, cmd: str, arg: str) -> None:
         if cmd in ("quit","exit","q"):
             out("info", "Exiting.")
-            # B3: flush DB background thread before exit
             try:
                 self.db.close()
             except Exception:
@@ -4983,8 +4989,6 @@ class REPL:
         elif fmt == "csv":
             resolved = Reporter._resolve_path(path, "csv")
             Reporter.to_csv(self._last, resolved)
-            # G4: derive base from the resolved (absolute) path so companion files
-            # land in REPORT_DIR, not the current working directory
             self._export_csv_extras(data, resolved)
         elif fmt == "html": Reporter.to_html(data, path)
         elif fmt == "md":   Reporter.to_markdown(data, path)
@@ -5095,7 +5099,6 @@ class REPL:
         self.orc.dork_engine.s            = self.orc.session
         self.orc.scrape_engine.s          = self.orc.session
         self.orc.hash_engine._session     = self.orc.session
-        # G2: also rebuild dorking_engine so it picks up the new proxy/Tor config
         self.orc.dorking_engine = DorkingEngine(self.config.concurrency, self.orc.db, self.config)
 
     # ── Investigation Dashboard ────────────────────────────────────────────
@@ -5560,12 +5563,11 @@ class ConfigManager:
 
     _cache: Dict[str, str] = {}
     _INI_PATHS = [HOME_NOX / "config.ini", Path("/etc/nox/config.ini")]
-    # B4: track apikeys.json mtime to detect external edits
     _store_mtime: float = 0.0
 
     @classmethod
     def _invalidate_if_changed(cls) -> None:
-        """B4: clear cache if apikeys.json was modified externally."""
+        """Clear the key cache if apikeys.json was modified externally."""
         if not _HAS_CONFIG_HANDLER or _ExtConfigManager is None:
             return
         try:
@@ -5813,7 +5815,7 @@ class DeHashEngine:
             return (h, cached)
         try:
             auth = base64.b64encode(self._key.encode()).decode() if ":" in self._key else self._key
-            url  = f"https://api.dehashed.com/search?query=hashed_password:{h}&size=1"
+            url  = f"https://api.dehashed.com/v2/search?query=hashed_password:{h}&size=1"
             hdrs = {"Accept": "application/json", "Authorization": f"Basic {auth}"}
             async with sem:
                 to = aiohttp_mod.ClientTimeout(total=self._config.timeout) if aiohttp_mod else None
@@ -6105,7 +6107,7 @@ class Vault:
                 # Synchronous fallback lookup via requests/urllib
                 try:
                     auth = base64.b64encode(key.encode()).decode() if ":" in key else key
-                    url  = (f"https://api.dehashed.com/search"
+                    url  = (f"https://api.dehashed.com/v2/search"
                             f"?query=hashed_password:{r.password_hash}&size=1")
                     hdrs = {"Accept": "application/json",
                             "Authorization": f"Basic {auth}",
@@ -6354,11 +6356,28 @@ class NoxSourceProvider(FileSystemProvider):
 
     async def _fetch(self, session, query: str) -> List[Record]:
         d   = self._def
+        # Apply optional query transform before URL substitution.
+        # Currently supported: "md5_lower" — MD5-hex of the lowercased, stripped query.
+        transform = d.get("query_transform", "")
+        if transform == "md5_lower":
+            import hashlib as _hl
+            try:
+                effective_query = _hl.md5(query.lower().strip().encode(),
+                                          usedforsecurity=False).hexdigest()
+            except TypeError:
+                effective_query = _hl.md5(query.lower().strip().encode()).hexdigest()
+        elif transform == "fofa_domain":
+            import base64 as _b64
+            effective_query = _b64.b64encode(
+                f'domain="{query.lower().strip()}"'.encode()
+            ).decode()
+        else:
+            effective_query = query
         # Headers are already resolved in _load_nox_sources; just substitute {query}
-        hdrs = {k: v.replace("{query}", urllib.parse.quote(query, safe=""))
+        hdrs = {k: v.replace("{query}", urllib.parse.quote(effective_query, safe=""))
                 for k, v in d.get("headers", {}).items()}
         url = (d["api_url"]
-               .replace("{query}", urllib.parse.quote(query, safe=""))
+               .replace("{query}", urllib.parse.quote(effective_query, safe=""))
                .replace("{api_key}", self._api_key or ""))
         # Also substitute any remaining {KEY_NAME} placeholders in URL
         for slot_name, slot_val in self._slot_keys.items():
@@ -6369,7 +6388,7 @@ class NoxSourceProvider(FileSystemProvider):
         def _sub(obj):
             """Recursively substitute {query} in payload (handles nested dicts/lists)."""
             if isinstance(obj, str):
-                return obj.replace("{query}", query).replace("{target}", query)
+                return obj.replace("{query}", effective_query).replace("{target}", effective_query)
             if isinstance(obj, dict):
                 return {k: _sub(v) for k, v in obj.items()}
             if isinstance(obj, list):
@@ -6385,10 +6404,22 @@ class NoxSourceProvider(FileSystemProvider):
         else:
             status, text, _ = await self._get(session, url, headers=hdrs)
 
+        # If the primary endpoint fails, try backup_endpoints in order.
         if status not in range(200, 300) or not text:
-            return []
-
-        # Two-phase poll: if poll_endpoint is defined, treat the first response
+            for backup in (d.get("backup_endpoints") or []):
+                backup_url = (backup
+                              .replace("{query}", urllib.parse.quote(query, safe=""))
+                              .replace("{target}", urllib.parse.quote(query, safe="")))
+                for slot_name, slot_val in self._slot_keys.items():
+                    backup_url = backup_url.replace(f"{{{slot_name}}}", slot_val or "")
+                if method == "POST":
+                    status, text, _ = await self._post(session, backup_url,
+                                                        json_data=payload or None,
+                                                        headers=hdrs)
+                else:
+                    status, text, _ = await self._get(session, backup_url, headers=hdrs)
+                if status in range(200, 300) and text:
+                    break
         # as a job submission, extract the job ID via poll_id_field, then poll
         # poll_endpoint?<poll_id_param>=<id> until results arrive.
         poll_endpoint = d.get("poll_endpoint", "")
@@ -6545,6 +6576,8 @@ class SourceOrchestrator:
                     "poll_id_field":         raw.get("poll_id_field", "id"),
                     "poll_id_param":         raw.get("poll_id_param", "id"),
                     "poll_json_root":        raw.get("poll_json_root", ""),
+                    "backup_endpoints":      raw.get("backup_endpoints", []),
+                    "query_transform":       raw.get("query_transform", ""),
                 }
                 inst = NoxSourceProvider(self._sem, self._db, self._config, defn)
                 inst._bypass_required = raw.get("bypass_required") or []
@@ -7093,12 +7126,10 @@ def main() -> None:
         config.proxy   = f"socks5h://127.0.0.1:{config.tor_socks}"
     if args.proxy:
         config.proxy = args.proxy
-    # K2: --guardian-off is an alias for --allow-leak
     config.allow_leak      = args.allow_leak or getattr(args, "guardian_off", False)
     config.no_online_crack = getattr(args, "no_online_crack", False)
     config.max_threads = config.concurrency = args.threads
     config.timeout     = args.timeout
-    # A9/I3: store no_pivot and depth in config so REPL and AvalancheScanner can read them
     config.no_pivot    = args.no_pivot
     if getattr(args, "depth", None) is not None:
         config.pivot_depth = args.depth
@@ -7122,7 +7153,6 @@ def _main_run(args, config: NoxConfig, db: NoxDB) -> None:
         repl._sources()
         return
 
-    # B6: --reset-sources forces a full resync from package
     if getattr(args, "reset_sources", False):
         import shutil as _shutil
         candidate = _PKG_ROOT / "sources"

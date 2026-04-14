@@ -2,6 +2,45 @@
 
 All notable changes to NOX are documented here.
 
+## [1.0.2] — 2026-04-14
+
+### Sources
+- **Fixed:** `misp_search` — `MISP_URL` added to `api_key_slots` so the instance base URL is resolved at runtime; `health_check_url` corrected from unresolvable placeholder to `https://misp.local`
+- **Fixed:** `threatconnect_search` — removed unresolvable `{TC_SIGNATURE}` HMAC placeholder from the `Authorization` header; `reliability_score` lowered to `2`, `is_volatile` set to `true`
+- **Fixed:** `spycloud_breach` — endpoint corrected from `breach/data/emails` to `breach/catalog/emails` (standard breach lookup tier)
+- **Fixed:** `duckduckgo_api` — primary instance updated to `search.sapti.me`; 5 backup SearXNG instances added to `backup_endpoints` (now consumed by the engine)
+- **Fixed:** `gravatar` — endpoint now MD5-hashes the email before URL substitution via new `query_transform: md5_lower` field; raw email was returning 404 on every query
+- **Replaced:** `bgpview_ip` → `ripestat_ip` (RIPE Stat prefix-overview API) — BGPView free API decommissioned January 2025; RIPE Stat is free, keyless, and stable (`reliability_score: 5`)
+- **Fixed:** `twitter_v2` — marked `is_volatile=true`, `confidence` lowered to `0.1`; free-tier bearer tokens receive HTTP 403 since February 2024
+- **Fixed:** `fofa_info` — `qbase64` parameter now receives `base64(domain="<target>")` via `query_transform: fofa_domain`; raw domain was producing malformed queries
+- **Fixed:** `pipl_search` — Pipl shut down public REST API in Q3 2024; `reliability_score` lowered to `2`, `confidence` to `0.3`, `is_volatile=true`
+- **Fixed:** `spyonweb` — API confirmed unreachable; `reliability_score` lowered to `1`, `confidence` to `0.1`, `is_volatile=true`
+- **Fixed:** `hudsonrock_osint` — `is_volatile=true`; `rate_limit` raised from `5.0` to `30.0` to respect Cavalier API throttling (~10 req/hour free tier)
+- **Fixed:** `mailboxlayer`, `numverify`, `ipstack`, `ipinfodb` — endpoints and `health_check_url` migrated from `http://` to `https://`; API keys were being transmitted in cleartext before the server-side redirect
+- **Added:** `xposedornot` plugin (free, public breach analytics)
+- **Added:** `MISP_URL` to service registry and `apikeys.json` — back-filled automatically on first run after upgrade
+- Source count: 123 → 124
+
+### Config
+- **Fixed:** Duplicate `xposedornot` entry removed from `SERVICE_REGISTRY` in `config_handler.py`
+
+### Engine
+- **Fixed:** `_parse_retry_after` helper added — `int()` on an HTTP-date `Retry-After` header raised `ValueError`, causing the retry loop to abort as a hard failure; all 5 call sites in `_get`, `_post`, `Session.get`, and `Session.post` updated
+- **Fixed:** `_random_headers` — `Sec-CH-UA` Client Hints were emitted even when a Firefox UA was passed via the `extra` override; guard now evaluates the final `User-Agent` after overrides are applied
+- **Fixed:** `HashEngine._hashmob` — Hashmob API v2 changed request field from `"hash"` to `"hashes"` (array) and response schema from `{found, result}` to `{data: [{plaintext}]}`
+- **Fixed:** `DeHashEngine` — both `_lookup` and the sync fallback were calling the deprecated `/search` (v1) endpoint; updated to `/v2/search`
+- **Fixed:** `DorkEngine.run` — results were labelled with the requested engine name (`google`/`bing`/`ddg`) instead of `SearXNG` which is the actual backend; the 3× request multiplication (one pass per engine name, all hitting the same SearXNG pool) is eliminated
+- **Fixed:** `DB.close()` — background event loop was stopped but never closed, leaving the loop object open on process exit
+- **Fixed:** `NoxSourceProvider._fetch` — `backup_endpoints` defined in source plugins were parsed but never consumed; primary endpoint failure now falls through to backups in order
+- **Fixed:** `_local_crack_sync_blocking` — `hashlib.md5/sha1` now called with `usedforsecurity=False` to prevent hard crash on FIPS-enabled systems (RHEL 9, hardened Kali); Python 3.8 compat guard included
+
+### Codebase
+- All internal tracking comments replaced with clean prose throughout `nox.py`, `build_sources.py`, and all helper modules
+
+### Build
+- `BUILD_DATE` updated to `2026-04-14`
+- `pyproject.toml` version bumped to `1.0.2`; `requests` minimum pin aligned to `>=2.32.3`
+
 ## [1.0.1] — 2026-04-13
 
 ### Sources
