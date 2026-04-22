@@ -4011,7 +4011,7 @@ class AdvancedReporter:
         else:
             lines.append("_No pivot assets discovered._")
 
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(path, "w", encoding="utf-8", errors="replace") as fh:
             fh.write("\n".join(lines) + "\n")
         out("ok", f"Markdown saved: {path}")
 
