@@ -26,6 +26,9 @@
     "health_check_url": "https://hashlookup.circl.lu",
     "expected_status": 200,
     "reliability_score": 5,
-    "backup_endpoints": [],
+    "backup_endpoints": [
+        "https://hashlookup.circl.lu/lookup/sha1/{target}",
+        "https://hashlookup.circl.lu/lookup/sha256/{target}"
+    ],
     "confidence": 1.0
 }

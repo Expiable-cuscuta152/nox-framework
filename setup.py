@@ -9,7 +9,7 @@ requirements = [
 
 setup(
     name="nox-cli",
-    version="1.0.0",
+    version="1.0.4",
     author="nox-project",
     description="Advanced Asynchronous Cyber Threat Intelligence Framework",
     long_description=Path("README.md").read_text(),

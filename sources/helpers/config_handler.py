@@ -228,7 +228,8 @@ class ConfigManager:
             return cls._cache[key_name]
         val = os.environ.get(key_name, "") or cls._get_store().get(key_name, "")
         result = None if (not val or val == UNIVERSAL_PLACEHOLDER) else val
-        cls._cache[key_name] = result
+        if result is not None:
+            cls._cache[key_name] = result
         return result
 
     # Backward-compatible alias used by nox.py internals

@@ -2,6 +2,23 @@
 
 All notable changes to NOX are documented here.
 
+## [1.0.4] — 2026-04-22
+
+### Engine
+- **Fixed:** `_build_ssl_context` — custom TLS context had zero CA certificates loaded, causing `SSLCertVerificationError` on all HTTPS connections. CA bundle now loaded via `certifi` with `load_default_certs()` fallback.
+- **Fixed:** `_NOISE_RE` in reporting — `ssl.`, `aiohttp.`, `asyncio.` were substring-matched, silently zeroing legitimate emails and domains (e.g. `user@ssl.example.com`). Patterns now anchored to start-of-string or whitespace.
+- **Fixed:** `COMBO_RE` in `ScrapeEngine` — multiline greedy match produced credentials with embedded newlines in email/password fields. Pattern now excludes newlines from both capture groups.
+- **Fixed:** `_in_flight` dict in `AvalancheScanner` — entries were never removed after processing, causing unbounded memory growth on deep scans. Entry is now popped in the `finally` block after the future resolves.
+- **Fixed:** `DorkingEngine.__init__` — `ProxyManager.get_proxies()` was called eagerly on every `Orchestrator` instantiation, triggering a proxy fetch and OPSEC warning even for local-only commands (`--crack`, `--list-sources`, `--analyze`). Proxy fetch is now lazy.
+- **Fixed:** `ScrapeEngine._fetch_content` — IntelX paste content fetch used `DB.get_key("intelx")` which does not read `apikeys.json`. Replaced with `Vault.get("INTELX_API_KEY")` for consistent key resolution.
+- **Fixed:** `AsyncSource._rec` and `RiskEngine.score` — plugin `confidence` values were stored in `NoxSourceProvider._confidence` but never transferred to `Record.source_confidence`. All 124 plugin records received a flat `0.5` confidence regardless of their declared value. `_rec()` now injects `self._confidence` into the record; `RiskEngine.score()` uses `record.source_confidence` as fallback when the source is not in `_SRC_CONFIDENCE`.
+- **Fixed:** `ConfigManager.get_key` — `None` results were cached, preventing env vars set after the first lookup from being detected in the same session. Only positive values are now cached.
+- **Fixed:** Recursive Avalanche Engine — identifiers extracted from paste content (`paste["patterns"]`) were not being harvested as pivot seeds. All `scrape_res["pastes"]` pattern matches are now fed into `_extract_ids_from_text`.
+
+### Sources
+- **Fixed:** `circl_hashlookup` — endpoint hardcoded to `/lookup/md5/{target}` but `input_type=hash` accepts SHA1/SHA256. SHA1 and SHA256 backup endpoints added; engine now routes each hash type to the correct path.
+- **Updated:** `crt_sh` — `reliability_score` lowered from 5 to 3, `is_volatile=true` added to reflect documented intermittent availability.
+
 ## [1.0.3] — 2026-04-15
 
 ### Engine

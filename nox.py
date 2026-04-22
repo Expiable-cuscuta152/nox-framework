@@ -150,7 +150,7 @@ except Exception:
             VERSION = _sp2.check_output(["dpkg-query", "-W", "-f=${Version}", "nox-cli"], stderr=_sp2.DEVNULL).decode().strip() or VERSION
         except Exception:
             pass
-BUILD_DATE = "2026-04-15"
+BUILD_DATE = "2026-04-16"
 
 # ── Smart Path Layout ──────────────────────────────────────────────────
 HOME_NOX    = Path.home() / ".nox"
@@ -646,7 +646,7 @@ class RiskEngine:
 
     @staticmethod
     def score(record: "Record") -> "Record":
-        conf = _SRC_CONFIDENCE.get(record.source, 0.5)
+        conf = _SRC_CONFIDENCE.get(record.source, record.source_confidence)
         record.source_confidence = conf
 
         dtypes_str = " ".join(record.data_types).lower() if record.data_types else ""
@@ -1540,6 +1540,11 @@ def _build_ssl_context() -> ssl.SSLContext:
     ctx.set_ciphers(Cfg.TLS_CIPHERS)
     ctx.check_hostname = True
     ctx.verify_mode    = ssl.CERT_REQUIRED
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except Exception:
+        ctx.load_default_certs()
     return ctx
 
 
@@ -1702,6 +1707,7 @@ class AsyncSource(ABC):
 
     def _rec(self, **kw) -> Record:
         kw.setdefault("source", self.name)
+        kw.setdefault("source_confidence", getattr(self, "_confidence", 0.5))
         sev = kw.pop("severity", Severity.MEDIUM)
         r   = Record(**{k: v for k, v in kw.items() if k in Record.__dataclass_fields__})
         r.severity = sev
@@ -2236,10 +2242,12 @@ class DorkingEngine(Src):
         super().__init__(*args, **kwargs)
         self._dead_proxies: set = set()
         self._proxy_index: int = 0
-        self.proxies = ProxyManager.get_proxies()
+        self.proxies: list = []
         self._dead_instances: set = set()
 
     def _get_next_proxy(self) -> Optional[str]:
+        if not self.proxies:
+            self.proxies = ProxyManager.get_proxies()
         live = [p for p in self.proxies if p not in self._dead_proxies]
         if not live:
             return None
@@ -2498,7 +2506,7 @@ class ScrapeEngine:
     CRED_RE  = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+\s*[:;|]\s*\S+", re.IGNORECASE)
     EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
     HASH_RE  = re.compile(r"\b[a-f0-9]{32,128}\b", re.IGNORECASE)
-    COMBO_RE = re.compile(r"^[^:]+:[^:]+$", re.MULTILINE)
+    COMBO_RE = re.compile(r"^[^\n:]+:[^\n:]+$", re.MULTILINE)
 
     PATTERNS = [
         (re.compile(r"(?:password|passwd|pass|pwd)\s*[:=]\s*\S+", re.I),                                                    "Password"),
@@ -2722,7 +2730,7 @@ class ScrapeEngine:
                 return ""
             raw_urls: dict = {}  # paste fetch URLs — resolved per site name
             if site == "IntelX":
-                key = self.db.get_key("intelx")
+                key = Vault.get("INTELX_API_KEY")
                 if key:
                     resp = self.s.get(f"https://2.intelx.io/file/read?type=1&systemid={pid}&k={key}", timeout=15)
                     if resp.ok:

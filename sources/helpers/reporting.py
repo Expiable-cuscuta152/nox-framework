@@ -14,9 +14,9 @@ from typing import Any, Dict, List
 # ── Noise patterns stripped from all report output ────────────────────
 _NOISE_RE = re.compile(
     r"(Traceback \(most recent|File \".*\.py\"|TimeoutError|ProxyError"
-    r"|ConnectionError|aiohttp\.|ClientConnector|ssl\.|asyncio\."
-    r"|Task exception|NoneType|Object of type)",
-    re.I,
+    r"|ConnectionError|ClientConnector|Task exception|NoneType|Object of type"
+    r"|(?:^|[\s(])aiohttp\.|(?:^|[\s(])asyncio\.|(?:^|[\s(])ssl\.)",
+    re.I | re.MULTILINE,
 )
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 

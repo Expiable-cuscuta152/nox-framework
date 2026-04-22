@@ -188,7 +188,7 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           input_type="domain", output_type=["domain"],
           normalization_map={"name_value": "domain"},
           tags=["passive", "fast"],
-          health_check_url="https://crt.sh", reliability_score=5),
+          health_check_url="https://crt.sh", reliability_score=3, is_volatile=True),
 
     _base("hackertarget_hostsearch", "dns_recon",
           "https://api.hackertarget.com/hostsearch/?q={target}", "GET",
@@ -521,7 +521,11 @@ FREE_PUBLIC_SOURCES: List[SourceConfig] = [
           normalization_map={"FileName": "filename", "MD5": "hash_md5"},
           tags=["passive", "fast"],
           health_check_url="https://hashlookup.circl.lu",
-          reliability_score=5),
+          reliability_score=5,
+          backup_endpoints=[
+              "https://hashlookup.circl.lu/lookup/sha1/{target}",
+              "https://hashlookup.circl.lu/lookup/sha256/{target}",
+          ]),
 
     _base("ipapi_is", "geolocation",
           "https://api.ipapi.is/?q={target}", "GET",

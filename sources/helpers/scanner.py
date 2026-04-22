@@ -227,6 +227,7 @@ class AvalancheScanner:
         finally:
             if not fut.done():
                 fut.set_result(None)
+            self._in_flight.pop(key, None)
 
     # ── Core pipeline ─────────────────────────────────────────────────
 
